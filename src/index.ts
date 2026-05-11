@@ -1,13 +1,27 @@
 #!/usr/bin/env node
 /**
  * EasyPanel MCP Server
- * 
+ *
  * ~40 curated tools for the most common operations + trpc_raw for everything else.
  * Covers 347 tRPC procedures total.
  *
  * Env:
- *   EASYPANEL_URL   - Panel URL
- *   EASYPANEL_TOKEN - API token
+ *   EASYPANEL_URL                       - Panel URL (required)
+ *   EASYPANEL_TOKEN                     - API token (required for stdio and bearer HTTP mode)
+ *   EASYPANEL_MCP_MODE                  - "stdio" (default) or "http"
+ *   EASYPANEL_AUTH_MODE                 - "bearer" (default) or "oauth" (HTTP mode only)
+ *   MCP_API_KEY                         - Shared key for bearer HTTP mode
+ *   OAUTH_ISSUER_URL                    - Public URL of this server when auth mode is oauth
+ *   OAUTH_STORE_PATH                    - Where to persist OAuth state (default ./.easypanel-mcp-oauth.json)
+ *   MCP_ACCESS_MODE                     - "full" (default) or "readonly"
+ *   PORT                                - HTTP port (default 3100)
+ *
+ *   Cloudflare Zero Trust (all optional):
+ *   CF_ACCESS_CLIENT_ID                 - Service token ID; sent on every backend Easypanel call
+ *   CF_ACCESS_CLIENT_SECRET             - Service token secret
+ *   CF_ACCESS_TEAM_DOMAIN               - e.g. "your-team.cloudflareaccess.com"; enables JWT verification
+ *   CF_ACCESS_AUD                       - Application AUD tag from CF Access; required with TEAM_DOMAIN
+ *   CF_ACCESS_REQUIRE_EMAIL_MATCH       - "true" to require submitted Easypanel email == CF-auth email
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -16,15 +30,20 @@ import { z } from "zod";
 import { EasyPanelClient } from "./client.js";
 
 const EP_URL = process.env.EASYPANEL_URL;
-const EP_TOKEN = process.env.EASYPANEL_TOKEN;
+const MODE = process.env.EASYPANEL_MCP_MODE || "stdio";
+const AUTH_MODE = (process.env.EASYPANEL_AUTH_MODE || "bearer").toLowerCase() as "bearer" | "oauth";
 
 if (!EP_URL) { console.error("EASYPANEL_URL required"); process.exit(1); }
-if (!EP_TOKEN) { console.error("EASYPANEL_TOKEN required"); process.exit(1); }
 
-const client = new EasyPanelClient(EP_URL, EP_TOKEN);
+const needsStaticToken = MODE !== "http" || AUTH_MODE !== "oauth";
+const EP_TOKEN = process.env.EASYPANEL_TOKEN;
+if (needsStaticToken && !EP_TOKEN) {
+  console.error("EASYPANEL_TOKEN required (unless EASYPANEL_AUTH_MODE=oauth)");
+  process.exit(1);
+}
 
-function createServer() {
-const server = new McpServer({ name: "easypanel", version: "0.2.0" });
+function createServer(client: EasyPanelClient) {
+const server = new McpServer({ name: "easypanel", version: "0.3.0" });
 
 function ok(r: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(r, null, 2) }] };
@@ -69,44 +88,44 @@ server.tool("inspect_project", "Get project details and Docker containers", {
 
 server.tool("create_app", "Create an app service", {
   ...ps,
-}, async (a) => m("app.createService", a));
+}, async (a) => m("services.app.createService", a));
 
 server.tool("inspect_app", "Get app service details (env, domains, build, source)", {
   ...ps,
-}, async (a) => q("app.inspectService", a));
+}, async (a) => q("services.app.inspectService", a));
 
 server.tool("deploy_app", "Trigger deployment for an app", {
   ...ps,
-}, async (a) => m("app.deployService", a));
+}, async (a) => m("services.app.deployService", a));
 
 server.tool("start_app", "Start an app service", { ...ps },
-  async (a) => m("app.startService", a));
+  async (a) => m("services.app.startService", a));
 
 server.tool("stop_app", "Stop an app service", { ...ps },
-  async (a) => m("app.stopService", a));
+  async (a) => m("services.app.stopService", a));
 
 server.tool("restart_app", "Restart an app service", { ...ps },
-  async (a) => m("app.restartService", a));
+  async (a) => m("services.app.restartService", a));
 
 server.tool("destroy_app", "Delete an app service", { ...ps },
-  async (a) => m("app.destroyService", a));
+  async (a) => m("services.app.destroyService", a));
 
 server.tool("set_app_source_image", "Set app source to a Docker image", {
   ...ps,
   image: z.string().describe("Docker image (e.g. nginx:latest)"),
-}, async (a) => m("app.updateSourceImage", a));
+}, async (a) => m("services.app.updateSourceImage", a));
 
 server.tool("set_app_source_github", "Set app source to a GitHub repo", {
   ...ps,
   owner: z.string(), repo: z.string(),
   branch: z.string().optional(),
   path: z.string().optional().describe("Subdirectory"),
-}, async (a) => m("app.updateSourceGithub", a));
+}, async (a) => m("services.app.updateSourceGithub", a));
 
 server.tool("set_app_env", "Update environment variables for an app", {
   ...ps,
   env: z.string().describe("KEY=VALUE lines"),
-}, async (a) => m("app.updateEnv", a));
+}, async (a) => m("services.app.updateEnv", a));
 
 server.tool("set_app_resources", "Set CPU/memory limits for an app", {
   ...ps,
@@ -114,7 +133,7 @@ server.tool("set_app_resources", "Set CPU/memory limits for an app", {
   memoryReservation: z.number().optional().describe("Memory reservation MB"),
   cpuLimit: z.number().optional().describe("CPU limit (1 = 1 core)"),
   cpuReservation: z.number().optional().describe("CPU reservation"),
-}, async (a) => m("app.updateResources", a));
+}, async (a) => m("services.app.updateResources", a));
 
 // ===================== DATABASES =====================
 
@@ -122,17 +141,17 @@ server.tool("create_database", "Create a database service", {
   ...ps,
   engine: z.enum(["postgres", "mysql", "mariadb", "mongo", "redis"]),
   password: z.string().optional().describe("Password (auto-generated if empty)"),
-}, async ({ engine, ...rest }) => m(`${engine}.createService`, rest));
+}, async ({ engine, ...rest }) => m(`services.${engine}.createService`, rest));
 
 server.tool("inspect_database", "Get database service info (connection string, status)", {
   ...ps,
   engine: z.enum(["postgres", "mysql", "mariadb", "mongo", "redis"]),
-}, async ({ engine, ...rest }) => q(`${engine}.inspectService`, rest));
+}, async ({ engine, ...rest }) => q(`services.${engine}.inspectService`, rest));
 
 server.tool("destroy_database", "Delete a database service", {
   ...ps,
   engine: z.enum(["postgres", "mysql", "mariadb", "mongo", "redis"]),
-}, async ({ engine, ...rest }) => m(`${engine}.destroyService`, rest));
+}, async ({ engine, ...rest }) => m(`services.${engine}.destroyService`, rest));
 
 // ===================== DOMAINS =====================
 
@@ -189,13 +208,13 @@ server.tool("storage_stats", "Get storage usage breakdown", {},
 // ===================== COMPOSE =====================
 
 server.tool("create_compose", "Create a Docker Compose service", { ...ps },
-  async (a) => m("compose.createService", a));
+  async (a) => m("services.compose.createService", a));
 
 server.tool("inspect_compose", "Get compose service details", { ...ps },
-  async (a) => q("compose.inspectService", a));
+  async (a) => q("services.compose.inspectService", a));
 
 server.tool("deploy_compose", "Deploy a compose service", { ...ps },
-  async (a) => m("compose.deployService", a));
+  async (a) => m("services.compose.deployService", a));
 
 // ===================== SYSTEM =====================
 
@@ -255,15 +274,48 @@ server.tool("trpc_raw", "Call any EasyPanel tRPC procedure directly. 347 procedu
 return server;
 }
 
-// Start in HTTP or stdio mode
-const mode = process.env.EASYPANEL_MCP_MODE || "stdio";
 const port = parseInt(process.env.PORT || "3100", 10);
 
-if (mode === "http") {
+const backendHeaders: Record<string, string> = {};
+if (process.env.CF_ACCESS_CLIENT_ID && process.env.CF_ACCESS_CLIENT_SECRET) {
+  backendHeaders["CF-Access-Client-Id"] = process.env.CF_ACCESS_CLIENT_ID;
+  backendHeaders["CF-Access-Client-Secret"] = process.env.CF_ACCESS_CLIENT_SECRET;
+}
+
+const cfTeam = process.env.CF_ACCESS_TEAM_DOMAIN?.trim();
+const cfAud = process.env.CF_ACCESS_AUD?.trim();
+const cfRequireEmailMatch = (process.env.CF_ACCESS_REQUIRE_EMAIL_MATCH || "").toLowerCase() === "true";
+if ((cfTeam && !cfAud) || (cfAud && !cfTeam)) {
+  console.error("CF_ACCESS_TEAM_DOMAIN and CF_ACCESS_AUD must be set together");
+  process.exit(1);
+}
+if (cfRequireEmailMatch && !(cfTeam && cfAud)) {
+  console.error("CF_ACCESS_REQUIRE_EMAIL_MATCH requires CF_ACCESS_TEAM_DOMAIN and CF_ACCESS_AUD");
+  process.exit(1);
+}
+const cfAccess = cfTeam && cfAud
+  ? { teamDomain: cfTeam.replace(/^https?:\/\//, "").replace(/\/+$/, ""), audience: cfAud, requireEmailMatch: cfRequireEmailMatch }
+  : undefined;
+
+if (MODE === "http") {
   const { startHttpServer } = await import("./http-server.js");
-  await startHttpServer(createServer, port);
+  await startHttpServer({
+    port,
+    easypanelUrl: EP_URL!,
+    authMode: AUTH_MODE,
+    createMcpServer: createServer,
+    bearerApiKey: process.env.MCP_API_KEY,
+    bearerEasypanelToken: EP_TOKEN,
+    oauthIssuer: process.env.OAUTH_ISSUER_URL,
+    oauthStorePath: process.env.OAUTH_STORE_PATH,
+    backendHeaders: Object.keys(backendHeaders).length ? backendHeaders : undefined,
+    cfAccess,
+  });
 } else {
-  const server = createServer();
+  const client = new EasyPanelClient(EP_URL!, EP_TOKEN!, {
+    extraHeaders: Object.keys(backendHeaders).length ? backendHeaders : undefined,
+  });
+  const server = createServer(client);
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }

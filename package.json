@@ -1,6 +1,6 @@
 {
   "name": "easypanel-mcp",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "MCP server for EasyPanel — manage servers, projects, services, databases via AI",
   "type": "module",
   "bin": {

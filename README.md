@@ -6,28 +6,56 @@ MCP server for [EasyPanel](https://easypanel.io) — manage your server, project
 
 ## 🚀 Quick Setup (Deploy on EasyPanel)
 
-The easiest way — deploy the MCP server as a service on your own EasyPanel:
+The easiest way — deploy the MCP server as a service on your own EasyPanel. Pick an auth mode:
 
-### 1. Get your API token
+- **OAuth** (recommended) — users sign in with their Easypanel email/password in a browser popup. No tokens to generate or paste. Per-user access.
+- **Bearer** — one shared API key + one Easypanel token baked into env vars.
 
-```bash
-curl -X POST https://YOUR_PANEL:3000/api/trpc/auth.login \
-  -H "Content-Type: application/json" \
-  -d '{"json":{"email":"you@email.com","password":"your-pass"}}'
+### OAuth mode (browser sign-in, per-user)
+
+1. Create a project (e.g. `mcp`), add an **App** service from GitHub `dray-supadev/easypanel-mcp`
+2. Add a domain (e.g. `mcp.your-domain.com`)
+3. Set environment variables:
+   ```
+   EASYPANEL_URL=http://easypanel:3000
+   EASYPANEL_MCP_MODE=http
+   EASYPANEL_AUTH_MODE=oauth
+   OAUTH_ISSUER_URL=https://mcp.your-domain.com
+   MCP_ACCESS_MODE=readonly
+   PORT=3000
+   ```
+4. (Optional but recommended) Mount a volume at `/data` and set `OAUTH_STORE_PATH=/data/oauth.json` so tokens survive redeploys.
+5. Deploy.
+
+Connect Claude Desktop or another OAuth-aware MCP client:
+
+```json
+{
+  "mcpServers": {
+    "easypanel": { "url": "https://mcp.your-domain.com/mcp" }
+  }
+}
 ```
 
-> If you have 2FA enabled, add `"code":"123456"` with your authenticator code.
+On first use the client will pop a browser window asking for your Easypanel credentials, then return you to Claude with an access token. No manual curl required.
 
-The response contains `"token":"xxx"` — that's your API token.
+> The login page calls Easypanel's `auth.login` internally and binds the session token to an opaque OAuth access token scoped to this MCP server. Credentials are never stored.
 
-> ⚠️ This is a **session token** that expires in 30 days. For a permanent token, use `users.generateApiToken` (see below).
+### Bearer mode (shared key, simpler)
 
-### 2. Deploy on EasyPanel
+1. Get your API token:
+   ```bash
+   curl -X POST https://YOUR_PANEL:3000/api/trpc/auth.login \
+     -H "Content-Type: application/json" \
+     -d '{"json":{"email":"you@email.com","password":"your-pass"}}'
+   ```
+   > If you have 2FA enabled, add `"code":"123456"` with your authenticator code.
 
-1. Create a new project (e.g. `mcp`)
-2. Create an **App** service
-3. Source → **GitHub** → `dray-supadev/easypanel-mcp`, branch `main`
-4. Set environment variables:
+   The response contains `"token":"xxx"` — that's your API token.
+
+   > ⚠️ This is a **session token** that expires in 30 days. For a permanent token, use `users.generateApiToken` (see below).
+
+2. Deploy on EasyPanel:
    ```
    EASYPANEL_URL=http://easypanel:3000
    EASYPANEL_TOKEN=your-api-token
@@ -36,32 +64,22 @@ The response contains `"token":"xxx"` — that's your API token.
    MCP_ACCESS_MODE=readonly
    PORT=3000
    ```
-   
-   > **Important:** Use `http://easypanel:3000` (internal Docker network) when deploying on the same EasyPanel instance. External URLs won't work from inside the container.
-   
-   > **`MCP_ACCESS_MODE`**: Set to `readonly` to block all write operations (create, deploy, destroy, restart). Set to `full` when you're ready to allow mutations.
 
-5. Add a domain (e.g. `mcp.your-domain.com`)
-6. Deploy!
+   > **Important:** Use `http://easypanel:3000` (internal Docker network) when deploying on the same EasyPanel instance.
+   > **`MCP_ACCESS_MODE`**: `readonly` blocks all write operations; set to `full` to allow mutations.
+   > ⚠️ **Set `MCP_API_KEY`** — without it, anyone with the URL can control your server. Use alphanumeric only (`!`, `%`, `^` may break in env vars).
 
-> ⚠️ **Set `MCP_API_KEY`** to protect your endpoint. Without it, anyone with the URL can control your server. Use a simple alphanumeric key — special characters (`!`, `%`, `^`) may break in env vars.
-
-### 3. Connect Claude Desktop
-
-Edit `%APPDATA%\Claude\claude_desktop_config.json` (Windows) or `~/Library/Application Support/Claude/claude_desktop_config.json` (Mac):
-
-```json
-{
-  "mcpServers": {
-    "easypanel": {
-      "url": "https://mcp.your-domain.com/mcp",
-      "headers": {
-        "Authorization": "Bearer your-secret-key"
-      }
-    }
-  }
-}
-```
+3. Connect Claude Desktop:
+   ```json
+   {
+     "mcpServers": {
+       "easypanel": {
+         "url": "https://mcp.your-domain.com/mcp",
+         "headers": { "Authorization": "Bearer your-secret-key" }
+       }
+     }
+   }
+   ```
 
 Restart Claude Desktop. Done! Ask Claude to "show my projects" 🎉
 
@@ -121,21 +139,35 @@ npm install && npm run build
 
 ## 🔒 Security
 
-- **`MCP_API_KEY`** — protects the HTTP endpoint with Bearer token auth
-- **`EASYPANEL_TOKEN`** — authenticates with your EasyPanel instance
-- Health endpoint (`/health`) is always public (returns no sensitive data)
-- In local/stdio mode, no network auth is needed
+- **OAuth mode** — per-user access via browser sign-in; the MCP server acts as an OAuth 2.1 authorization server (PKCE required, dynamic client registration per RFC 7591). Access tokens are opaque and bound to the user's Easypanel session token server-side; credentials never leave this server in stored form.
+- **Bearer mode** — `MCP_API_KEY` protects the endpoint, `EASYPANEL_TOKEN` is used for all API calls.
+- Health endpoint (`/health`) is always public (returns no sensitive data).
+- In local/stdio mode, no network auth is needed.
 
 ## Environment Variables
 
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `EASYPANEL_URL` | ✅ | Your EasyPanel URL |
-| `EASYPANEL_TOKEN` | ✅ | API token from login |
-| `EASYPANEL_MCP_MODE` | For HTTP | Set to `http` for remote deployment |
-| `MCP_API_KEY` | Recommended | Protects the MCP endpoint |
+| `EASYPANEL_TOKEN` | Bearer/stdio | API token from login (not needed in OAuth mode) |
+| `EASYPANEL_MCP_MODE` | For HTTP | `stdio` (default) or `http` |
+| `EASYPANEL_AUTH_MODE` | No | `bearer` (default) or `oauth` |
+| `MCP_API_KEY` | Bearer HTTP | Shared key protecting the endpoint |
+| `OAUTH_ISSUER_URL` | OAuth | Public URL of this server (e.g. `https://mcp.example.com`) |
+| `OAUTH_STORE_PATH` | No | Where to persist OAuth state (default `./.easypanel-mcp-oauth.json`) |
 | `MCP_ACCESS_MODE` | No | `full` (default) or `readonly` — blocks all mutations |
-| `PORT` | No | HTTP port (default: 3000) |
+| `PORT` | No | HTTP port (default: 3100) |
+
+## OAuth Endpoints
+
+When `EASYPANEL_AUTH_MODE=oauth`, the server exposes:
+
+- `GET /.well-known/oauth-authorization-server` — RFC 8414 metadata
+- `GET /.well-known/oauth-protected-resource` — RFC 9728 metadata
+- `POST /register` — RFC 7591 dynamic client registration
+- `GET /authorize` — login page
+- `POST /authorize` — credentials → authorization code (302 redirect to client)
+- `POST /token` — `authorization_code` and `refresh_token` grants (S256 PKCE required)
 
 ## Generating a Permanent API Token
 

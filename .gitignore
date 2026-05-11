@@ -2,3 +2,5 @@ node_modules/
 dist/
 *.tsbuildinfo
 .env
+.easypanel-mcp-oauth.json
+*.oauth.json
