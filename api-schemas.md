@@ -32,7 +32,7 @@ Error:
 - Input: `{projectName: string}`
 - Output: `{project: {name, createdAt}, services: []}`
 
-### monitor.getSystemStats
+### monitorOld.getSystemStats
 - Input: none
 - Output: `{uptime, memInfo: {totalMemMb, usedMemMb, freeMemMb, usedMemPercentage, freeMemPercentage}, diskInfo: {totalGb, usedGb, freeGb, usedPercentage, freePercentage}, cpuInfo: {usedPercentage, count, loadavg}, network: {inputMb, outputMb}}`
 

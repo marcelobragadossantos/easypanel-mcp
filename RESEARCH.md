@@ -7,6 +7,14 @@
 - SSH: root (key: ~/.ssh/easypanel_test)
 - EasyPanel v2.26.3
 
+## Version Notes
+Procedure paths below are from v2.26.3. Newer EasyPanel versions have
+renamed the `monitor.*` router to `monitorOld.*` (likely to make room
+for a v2 monitor implementation). The MCP tools `system_stats`,
+`service_stats`, and `storage_stats` target the new name. If you're
+adding tools that reference `monitor.*` from this doc, verify the
+current name against the running server before mapping.
+
 ## API Architecture
 - **Protocol:** tRPC over HTTP
 - **Base URL:** `http://<host>:3000/api/trpc/`
@@ -32,7 +40,7 @@ twoFactor, update, users, volumeBackups, wordpress
 - app.* (deploy, start/stop, inspect, env)
 - domains.* (CRUD)
 - settings.* (server config)
-- monitor.* (stats)
+- monitor.* (stats) — renamed to `monitorOld.*` in versions after v2.26.3
 - auth.login
 
 ### Nice-to-have (Phase 2)

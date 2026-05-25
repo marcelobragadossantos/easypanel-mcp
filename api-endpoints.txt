@@ -1,3 +1,8 @@
+# Extracted from EasyPanel v2.26.3 (see RESEARCH.md).
+# Some entries may be stale on newer versions — notably, the entire `monitor.*`
+# router has been renamed to `monitorOld.*`. Verify against the running server
+# (browser DevTools → Network on a tRPC call) before mapping new MCP tools.
+
 actions.getAction [QUERY]
 actions.killAction [MUTATION]
 actions.listActions [QUERY]
