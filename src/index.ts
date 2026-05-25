@@ -218,13 +218,13 @@ server.tool("list_mounts", "List volume mounts for a service", { ...ps },
 // ===================== MONITORING =====================
 
 server.tool("system_stats", "Get system stats (CPU, memory, disk, network)", {},
-  async () => q("monitor.getSystemStats"));
+  async () => q("monitorOld.getSystemStats"));
 
 server.tool("service_stats", "Get resource stats for a service", { ...ps },
-  async (a) => q("monitor.getServiceStats", a));
+  async (a) => q("monitorOld.getServiceStats", a));
 
 server.tool("storage_stats", "Get storage usage breakdown", {},
-  async () => q("monitor.getStorageStats"));
+  async () => q("monitorOld.getStorageStats"));
 
 // ===================== COMPOSE =====================
 
