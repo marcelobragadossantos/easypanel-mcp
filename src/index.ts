@@ -13,7 +13,9 @@
  *   MCP_API_KEY                         - Shared key for bearer HTTP mode
  *   OAUTH_ISSUER_URL                    - Public URL of this server when auth mode is oauth
  *   OAUTH_STORE_PATH                    - Where to persist OAuth state (default ./.easypanel-mcp-oauth.json)
- *   MCP_ACCESS_MODE                     - "full" (default) or "readonly"
+ *   MCP_ACCESS_MODE                     - "full" (default), "readonly", or "safe"
+ *                                         safe: blocks destructive mutations matching
+ *                                         /(destroy|delete|remove|prune|reboot|cleanup|wipe|purge|reset)/i
  *   PORT                                - HTTP port (default 3100)
  *
  *   Cloudflare Zero Trust (all optional):
@@ -52,13 +54,32 @@ function err(e: unknown) {
   const msg = e instanceof Error ? e.message : String(e);
   return { content: [{ type: "text" as const, text: `Error: ${msg}` }], isError: true as const };
 }
-const READONLY = (process.env.MCP_ACCESS_MODE || "full").toLowerCase() === "readonly";
+type AccessMode = "full" | "readonly" | "safe";
+const rawAccessMode = (process.env.MCP_ACCESS_MODE || "full").toLowerCase();
+const ACCESS_MODE: AccessMode =
+  rawAccessMode === "readonly" || rawAccessMode === "safe" ? rawAccessMode : "full";
+
+const DESTRUCTIVE_RE = /(destroy|delete|remove|prune|reboot|cleanup|wipe|purge|reset)/i;
+function isDestructive(proc: string): boolean {
+  return DESTRUCTIVE_RE.test(proc);
+}
+
+function gateMutation(proc: string) {
+  if (ACCESS_MODE === "readonly") {
+    return err(new Error("Read-only mode. Mutations are disabled (MCP_ACCESS_MODE=readonly)."));
+  }
+  if (ACCESS_MODE === "safe" && isDestructive(proc)) {
+    return err(new Error(`Safe mode blocks destructive procedure '${proc}'. Matched /(destroy|delete|remove|prune|reboot|cleanup|wipe|purge|reset)/i. Set MCP_ACCESS_MODE=full to allow.`));
+  }
+  return null;
+}
 
 async function q(proc: string, input?: Record<string, unknown>) {
   try { return ok(await client.query(proc, input as any)); } catch (e) { return err(e); }
 }
 async function m(proc: string, input?: Record<string, unknown>) {
-  if (READONLY) return { content: [{ type: "text" as const, text: "Error: Read-only mode. Mutations are disabled (MCP_ACCESS_MODE=readonly)." }], isError: true as const };
+  const blocked = gateMutation(proc);
+  if (blocked) return blocked;
   try { return ok(await client.mutation(proc, input ?? {})); } catch (e) { return err(e); }
 }
 
@@ -263,6 +284,10 @@ server.tool("trpc_raw", "Call any EasyPanel tRPC procedure directly. 347 procedu
   input: z.record(z.string(), z.unknown()).optional(),
   isMutation: z.boolean().optional().describe("true for write operations, false for reads (default)"),
 }, async ({ procedure, input, isMutation }) => {
+  if (isMutation) {
+    const blocked = gateMutation(procedure);
+    if (blocked) return blocked;
+  }
   try {
     const result = isMutation
       ? await client.mutation(procedure, input ?? {})
