@@ -30,6 +30,18 @@ export class EasyPanelClient {
     this.extraHeaders = opts?.extraHeaders ?? {};
   }
 
+  getBaseUrl(): string {
+    return this.baseUrl;
+  }
+
+  getToken(): string | null {
+    return this.token;
+  }
+
+  getExtraHeaders(): Record<string, string> {
+    return { ...this.extraHeaders };
+  }
+
   async login(email: string, password: string): Promise<string> {
     const result = await this.mutation("auth.login", { email, password });
     this.token = result.token as string;

@@ -132,7 +132,7 @@ export async function startHttpServer(opts: HttpServerOptions) {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({
         status: "ok",
-        tools: 40,
+        tools: 41,
         auth_mode: opts.authMode,
         sessions: sessions.size,
       }));
