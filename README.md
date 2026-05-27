@@ -2,7 +2,7 @@
 
 MCP server for [EasyPanel](https://easypanel.io) — manage your server, projects, services, databases, and domains through any MCP-compatible AI agent (Claude, Cursor, etc.).
 
-**40 curated tools** + raw tRPC access to all **347 EasyPanel API procedures**.
+**41 curated tools** + raw tRPC access to all **347 EasyPanel API procedures**.
 
 ## 🚀 Quick Setup (Deploy on EasyPanel)
 
@@ -108,7 +108,7 @@ npm install && npm run build
 }
 ```
 
-## 🔧 Available Tools (40)
+## 🔧 Available Tools (41)
 
 ### Projects
 `list_projects` · `create_project` · `destroy_project` · `inspect_project`
@@ -133,6 +133,25 @@ npm install && npm run build
 
 ### System
 `cleanup_docker` · `system_prune` · `restart_panel` · `reboot_server` · `list_users` · `list_certificates` · `list_nodes` · `deploy_template`
+
+### Deploy & Runtime Logs
+`list_actions` · `get_action_log` · `get_container_logs`
+
+`get_container_logs` streams a container's runtime logs over Easypanel's `/ws/serviceLogs` WebSocket (the same channel the panel UI uses). It returns the last N lines and closes once the stream goes idle or hits the hard cap. Works for app and compose services in a project.
+
+```jsonc
+// Example call
+{
+  "name": "get_container_logs",
+  "arguments": {
+    "projectName": "dashboard",
+    "serviceName": "dash-bussola-back",
+    "tail": 200
+  }
+}
+```
+
+For compose services, pass `compose: true` and `composeInternalService: "<name from compose file>"`.
 
 ### Escape Hatch
 `trpc_raw` — call any of the 347 tRPC procedures directly

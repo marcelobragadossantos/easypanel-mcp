@@ -30,6 +30,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { EasyPanelClient } from "./client.js";
+import { getContainerLogs } from "./logs.js";
 
 const EP_URL = process.env.EASYPANEL_URL;
 const MODE = process.env.EASYPANEL_MCP_MODE || "stdio";
@@ -276,6 +277,45 @@ server.tool("list_actions", "List recent deploy actions/builds. Filter by projec
 server.tool("get_action_log", "Get deploy action details including full build/deploy log", {
   id: z.string().describe("Action ID from list_actions"),
 }, async (a) => q("actions.getAction", a));
+
+// ===================== CONTAINER LOGS (runtime) =====================
+
+server.tool(
+  "get_container_logs",
+  "Stream a container's runtime logs over Easypanel's /ws/serviceLogs WebSocket. Returns the last N lines (default 200), then closes after the stream goes idle (5s) or the hard cap (30s). For app and compose services in projects; system services are not supported via this tool.",
+  {
+    ...ps,
+    tail: z.number().int().positive().optional().describe("Max lines to return (default 200)"),
+    compose: z.boolean().optional().describe("True if the target is a compose service (default false)"),
+    composeInternalService: z.string().optional().describe("Required when compose=true: the service name from the compose file"),
+    idleTimeoutMs: z.number().int().positive().optional().describe("Close after this many ms with no new lines (default 5000)"),
+    hardTimeoutMs: z.number().int().positive().optional().describe("Absolute time cap in ms (default 30000)"),
+  },
+  async ({ projectName, serviceName, tail, compose, composeInternalService, idleTimeoutMs, hardTimeoutMs }) => {
+    const token = client.getToken();
+    if (!token) {
+      return err(new Error("EASYPANEL_TOKEN is required for log streaming (the panel WS only authenticates via the API token in the query string)."));
+    }
+    if (compose && !composeInternalService) {
+      return err(new Error("composeInternalService is required when compose=true."));
+    }
+    try {
+      const result = await getContainerLogs({
+        baseUrl: client.getBaseUrl(),
+        token,
+        service: `${projectName}_${serviceName}`,
+        compose: compose ?? false,
+        composeInternalService,
+        tail: tail ?? 200,
+        idleTimeoutMs: idleTimeoutMs ?? 5000,
+        hardTimeoutMs: hardTimeoutMs ?? 30000,
+      });
+      return ok(result);
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
 
 // ===================== RAW tRPC =====================
 
