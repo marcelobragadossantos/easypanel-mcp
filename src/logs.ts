@@ -106,9 +106,9 @@ export async function getContainerLogs(opts: ContainerLogsOptions): Promise<Cont
         const raw = buffer.slice(0, nl);
         buffer = buffer.slice(nl + 1);
         lines.push(stripAnsi ? raw.replace(ANSI_RE, "") : raw);
-        if (lines.length >= tail * 2) {
-          // keep memory bounded — drop older entries early
-          lines.splice(0, lines.length - tail);
+        if (lines.length >= tail) {
+          finish("tail_reached");
+          return;
         }
         nl = buffer.indexOf("\n");
       }
