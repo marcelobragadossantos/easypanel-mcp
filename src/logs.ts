@@ -22,7 +22,7 @@ export interface ContainerLogsOptions {
   service: string;
   compose?: boolean;
   composeInternalService?: string;
-  /** Max lines to collect before closing (default 200). */
+  /** Max lines to return — the most recent N (default 200). */
   tail?: number;
   /** Close after this many ms without new data (default 5000). */
   idleTimeoutMs?: number;
@@ -34,7 +34,7 @@ export interface ContainerLogsOptions {
 
 export interface ContainerLogsResult {
   lines: string[];
-  closedReason: "tail_reached" | "idle_timeout" | "hard_timeout" | "server_closed";
+  closedReason: "idle_timeout" | "hard_timeout" | "server_closed";
 }
 
 export async function getContainerLogs(opts: ContainerLogsOptions): Promise<ContainerLogsResult> {
@@ -72,7 +72,9 @@ export async function getContainerLogs(opts: ContainerLogsOptions): Promise<Cont
       if (idleTimer) clearTimeout(idleTimer);
       if (hardTimer) clearTimeout(hardTimer);
       try { ws.close(); } catch { /* noop */ }
-      if (buffer.length > 0 && lines.length < tail) {
+      // Flush any trailing partial line — it's the freshest output, so it must
+      // survive the slice below even when we already hold `tail` complete lines.
+      if (buffer.length > 0) {
         lines.push(stripAnsi ? buffer.replace(ANSI_RE, "") : buffer);
       }
       resolve({ lines: lines.slice(-tail), closedReason: reason });
@@ -106,9 +108,12 @@ export async function getContainerLogs(opts: ContainerLogsOptions): Promise<Cont
         const raw = buffer.slice(0, nl);
         buffer = buffer.slice(nl + 1);
         lines.push(stripAnsi ? raw.replace(ANSI_RE, "") : raw);
-        if (lines.length >= tail) {
-          finish("tail_reached");
-          return;
+        // The WS replays history oldest->newest before going live. Keep only the
+        // most recent `tail` lines (sliding window) and let idle/hard timeout
+        // decide when we've caught up. Closing early on count returned the HEAD
+        // of the backlog (stale) — the chronic "logs always behind" bug.
+        if (lines.length > tail) {
+          lines.shift();
         }
         nl = buffer.indexOf("\n");
       }
